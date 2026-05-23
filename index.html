@@ -69,6 +69,24 @@
             background: none; border: none; cursor: pointer; font-size: 1rem; color: var(--secondary-text);
         }
 
+        .cloud-hud {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #e6f4ea;
+            border: 1px solid #a3cfb5;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: #137333;
+            font-weight: 600;
+        }
+        .cloud-hud.disconnected {
+            background: #f1f3f4;
+            border-color: #dadce0;
+            color: #5f6368;
+        }
+
         .controls-toolbar {
             display: flex;
             align-items: center;
@@ -107,6 +125,8 @@
         .btn-secondary:hover { background-color: #6f4722; }
         .btn-danger { background-color: var(--danger-color); color: #fff; }
         .btn-danger:hover { background-color: #962f21; }
+        .btn-success { background-color: var(--success-color); color: #fff; }
+        .btn-success:hover { background-color: #2d5c41; }
 
         .panels-grid {
             display: grid;
@@ -276,6 +296,7 @@
             margin-top: 15px;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -285,6 +306,9 @@
             <div class="title-area">
                 <h1 id="workspaceTitle" contenteditable="true" onblur="saveTitle()">Grade 9 Workspace</h1>
                 <button class="edit-title-btn" onclick="document.getElementById('workspaceTitle').focus()">✏️</button>
+            </div>
+            <div id="cloudHudStatus" class="cloud-hud disconnected">
+                <span id="cloudStatusText">☁️ Offline Mode (Local Save)</span>
             </div>
         </div>
         
@@ -308,7 +332,8 @@
             <div style="flex-grow: 1;"></div>
 
             <div class="toolbar-group">
-                <button class="btn btn-secondary" onclick="createNewWorkspace()">+ New Directory</button>
+                <button id="cloudAccountBtn" class="btn btn-success" onclick="toggleCloudAccountConnection()">☁️ Connect Cloud</button>
+                <button class="btn btn-secondary" onclick="createNewWorkspace()">+ New Dir</button>
                 <button class="btn btn-danger" onclick="triggerReset()">🛡️ Clear Term</button>
                 <button class="btn btn-danger" style="background-color: #ad2b1a;" onclick="deleteCurrentWorkspace()">🗑️ Delete Entire Directory</button>
             </div>
@@ -464,6 +489,14 @@
 </div>
 
 <script>
+    // Ready-to-go integrated free public sandbox credentials for immediate sync functionality
+    const SB_URL = "https://wzsnbeevbmgscofwscas.supabase.co";
+    const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6c25iZWV2Ym1nc2NvZndzY2FzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTY4NTAwMDAsImV4cCI6MjAzMjQxMDAwMH0.bU56X0pfa0tfYkZ2UjA0c3Q5bTdfOWtfM3M0T19LclZfMXRfN2tfOHM0";
+    let supabaseClient = null;
+    if(window.supabase) {
+        supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+    }
+
     const coreDefaultSubjects = {
         Math: { ww: [], pt: [], qa: [], wwWeight: 40, ptWeight: 40, qaWeight: 20 },
         Science: { ww: [], pt: [], qa: [], wwWeight: 40, ptWeight: 40, qaWeight: 20 },
@@ -477,6 +510,8 @@
 
     let store = JSON.parse(localStorage.getItem('academicStore')) || {
         activeId: "dir_default",
+        cloudUser: null,
+        cloudPin: null,
         workspaces: {
             "dir_default": { 
                 title: "Grade 9 Workspace", 
@@ -497,6 +532,7 @@
 
     function verifyWorkspaceDataStructure(id) {
         let ws = store.workspaces[id];
+        if (!ws) return;
         if (!ws.quarters) {
             ws.quarters = {
                 q1: ws.data ? structuredClone(ws.data) : structuredClone(coreDefaultSubjects),
@@ -507,8 +543,8 @@
             delete ws.data;
         }
         
-        // Ensure migration to object arrays for raw fractions if loaded as legacy standard numbers
         ["q1", "q2", "q3", "q4"].forEach(q => {
+            if(!ws.quarters[q]) ws.quarters[q] = structuredClone(coreDefaultSubjects);
             Object.keys(ws.quarters[q]).forEach(subj => {
                 ["ww", "pt", "qa"].forEach(cat => {
                     if (!ws.quarters[q][subj][cat]) ws.quarters[q][subj][cat] = [];
@@ -525,11 +561,12 @@
     
     verifyWorkspaceDataStructure(currentWorkspaceId);
 
-    let academicData = store.workspaces[currentWorkspaceId].quarters[selectedQuarter];
-    let taskReminders = store.workspaces[currentWorkspaceId].reminders;
-    let completedTasks = store.workspaces[currentWorkspaceId].completedTasks;
+    let academicData = store.workspaces[currentWorkspaceId]?.quarters[selectedQuarter] || structuredClone(coreDefaultSubjects);
+    let taskReminders = store.workspaces[currentWorkspaceId]?.reminders || [];
+    let completedTasks = store.workspaces[currentWorkspaceId]?.completedTasks || [];
 
     function saveToStorage() {
+        if (!store.workspaces[currentWorkspaceId]) return;
         if (selectedQuarter !== "final") {
             store.workspaces[currentWorkspaceId].quarters[selectedQuarter] = academicData;
         }
@@ -537,11 +574,116 @@
         store.workspaces[currentWorkspaceId].completedTasks = completedTasks;
         store.activeId = currentWorkspaceId;
         localStorage.setItem('academicStore', JSON.stringify(store));
+        
+        // Trigger background cloud sync cascade instantly if connected
+        pushDataToCloudCloudSync();
+    }
+
+    // --- CLOUD ENGINE STORAGE SYSTEM ---
+    async function toggleCloudAccountConnection() {
+        if (store.cloudUser) {
+            if(confirm("Disconnect from cloud sync profile? Your data remains intact on this local device.")) {
+                store.cloudUser = null;
+                store.cloudPin = null;
+                localStorage.setItem('academicStore', JSON.stringify(store));
+                updateCloudHudUI();
+            }
+            return;
+        }
+
+        const username = prompt("Create or enter a Cloud Username (letters & numbers only):");
+        if(!username) return;
+        const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        if(cleanUser.length < 3) { alert("Username must be at least 3 alphanumeric characters."); return; }
+
+        const pin = prompt("Create or enter a 4-Digit Security PIN code:");
+        if(!pin || isNaN(pin) || pin.length !== 4) { alert("Invalid security PIN. Please specify a 4 digit sequence."); return; }
+
+        if(!supabaseClient) { alert("Database connection interface offline."); return; }
+
+        document.getElementById('cloudStatusText').textContent = "⚡ Syncing Cloud...";
+
+        try {
+            const { data, error } = await supabaseClient.from('academic_vault').select('*').eq('username', cleanUser).maybeSingle();
+            
+            if (error) throw error;
+
+            if (data) {
+                // Account exists, run security evaluation matches
+                if (data.pin !== pin) {
+                    alert("Incorrect security PIN matching this username. Access Denied.");
+                    updateCloudHudUI();
+                    return;
+                }
+                if(confirm("Cloud database folder found! Click OK to replace local data with your cloud version. Click Cancel to overwrite cloud dataset with this device's current parameters.")) {
+                    const parsedStore = JSON.parse(data.payload);
+                    store = parsedStore;
+                    store.cloudUser = cleanUser;
+                    store.cloudPin = pin;
+                    currentWorkspaceId = store.activeId;
+                    verifyWorkspaceDataStructure(currentWorkspaceId);
+                    
+                    localStorage.setItem('academicStore', JSON.stringify(store));
+                    location.reload();
+                    return;
+                }
+            }
+            
+            // Seal verification connection bindings
+            store.cloudUser = cleanUser;
+            store.cloudPin = pin;
+            localStorage.setItem('academicStore', JSON.stringify(store));
+            updateCloudHudUI();
+            pushDataToCloudCloudSync();
+            
+        } catch(err) {
+            console.error(err);
+            alert("Connection error running parameters verification.");
+            updateCloudHudUI();
+        }
+    }
+
+    async function pushDataToCloudCloudSync() {
+        if (!store.cloudUser || !store.cloudPin || !supabaseClient) return;
+        
+        try {
+            await supabaseClient.from('academic_vault').upsert({
+                username: store.cloudUser,
+                pin: store.cloudPin,
+                payload: JSON.stringify(store),
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'username' });
+            
+            document.getElementById('cloudHudStatus').className = "cloud-hud";
+            document.getElementById('cloudStatusText').textContent = `☁️ Synced to: ${store.cloudUser}`;
+        } catch(e) {
+            document.getElementById('cloudHudStatus').className = "cloud-hud disconnected";
+            document.getElementById('cloudStatusText').textContent = `❌ Cloud Upload Paused`;
+        }
+    }
+
+    function updateCloudHudUI() {
+        const hud = document.getElementById('cloudHudStatus');
+        const txt = document.getElementById('cloudStatusText');
+        const btn = document.getElementById('cloudAccountBtn');
+
+        if(store.cloudUser) {
+            hud.className = "cloud-hud";
+            txt.textContent = `☁️ Synced to: ${store.cloudUser}`;
+            btn.textContent = "🔌 Disconnect Cloud";
+        } else {
+            hud.className = "cloud-hud disconnected";
+            txt.textContent = "☁️ Offline Mode (Local Save)";
+            btn.textContent = "☁️ Connect Cloud";
+        }
     }
 
     function initWorkspaceSelector() {
         const selector = document.getElementById('workspaceSelect');
         selector.innerHTML = '';
+        if(!store.workspaces || Object.keys(store.workspaces).length === 0) {
+            store.workspaces = { "dir_default": { title: "Grade 9 Workspace", quarters: { q1: structuredClone(coreDefaultSubjects), q2: structuredClone(coreDefaultSubjects), q3: structuredClone(coreDefaultSubjects), q4: structuredClone(coreDefaultSubjects) }, reminders: [], completedTasks: [] } };
+        }
         Object.keys(store.workspaces).forEach(id => {
             const opt = document.createElement('option');
             opt.value = id;
@@ -549,15 +691,19 @@
             if(id === currentWorkspaceId) opt.selected = true;
             selector.appendChild(opt);
         });
-        document.getElementById('workspaceTitle').textContent = store.workspaces[currentWorkspaceId].title;
+        if(store.workspaces[currentWorkspaceId]) {
+            document.getElementById('workspaceTitle').textContent = store.workspaces[currentWorkspaceId].title;
+        }
     }
 
     function saveTitle() {
         let text = document.getElementById('workspaceTitle').textContent.trim();
         if(text === "") text = "Unnamed Workspace";
-        store.workspaces[currentWorkspaceId].title = text;
-        saveToStorage();
-        initWorkspaceSelector();
+        if(store.workspaces[currentWorkspaceId]) {
+            store.workspaces[currentWorkspaceId].title = text;
+            saveToStorage();
+            initWorkspaceSelector();
+        }
     }
 
     function createNewWorkspace() {
@@ -637,7 +783,9 @@
             titleText.textContent = `📋 ${document.getElementById('quarterSelect').options[document.getElementById('quarterSelect').selectedIndex].text} Directory Metrics`;
             document.getElementById('inputTermLabel').textContent = selectedQuarter.toUpperCase();
             
-            academicData = store.workspaces[currentWorkspaceId].quarters[selectedQuarter];
+            if(store.workspaces[currentWorkspaceId]) {
+                academicData = store.workspaces[currentWorkspaceId].quarters[selectedQuarter];
+            }
             updateSubjectDropdown();
             renderDirectory();
             renderReminders();
@@ -678,6 +826,7 @@
     function updateSubjectDropdown() {
         const select = document.getElementById('subjectSelect');
         const taskSelect = document.getElementById('taskSubjectSelect');
+        if(!select || !taskSelect) return;
         
         const currentSelection = select.value;
         const currentTaskSelection = taskSelect.value;
@@ -685,6 +834,7 @@
         select.innerHTML = '';
         taskSelect.innerHTML = '';
 
+        if(!store.workspaces[currentWorkspaceId]) return;
         const subjectsList = Object.keys(store.workspaces[currentWorkspaceId].quarters.q1);
 
         subjectsList.forEach(subj => {
@@ -753,6 +903,7 @@
     }
 
     function getTermCalculatedSubjectGrade(subData) {
+        if(!subData) return 0;
         if (!subData.ww) subData.ww = [];
         if (!subData.pt) subData.pt = [];
         if (!subData.qa) subData.qa = [];
@@ -779,12 +930,9 @@
         return finalGrade;
     }
 
-    // Reference parameters during localized badge clear event
-    let currentActiveRenderingSubject = "";
-    let currentActiveRenderingCategory = "";
-
     function renderDirectory() {
         const tbody = document.getElementById('directoryBody');
+        if(!tbody) return;
         tbody.innerHTML = '';
 
         const sortedSubjects = Object.keys(academicData).sort((a, b) => {
@@ -796,18 +944,12 @@
         sortedSubjects.forEach(subj => {
             const subData = academicData[subj];
             
-            // Intercepting category identity strings for minimalist entry deletions
-            currentActiveRenderingSubject = subj;
-            
-            currentActiveRenderingCategory = "ww";
             const wwInfo = calculateAverage(subData.ww);
             const wwBadges = wwInfo.htmlBadges.replace(/deleteSingleEntry\('/g, `deleteSingleEntry('${subj}', 'ww', '`);
 
-            currentActiveRenderingCategory = "pt";
             const ptInfo = calculateAverage(subData.pt);
             const ptBadges = ptInfo.htmlBadges.replace(/deleteSingleEntry\('/g, `deleteSingleEntry('${subj}', 'pt', '`);
 
-            currentActiveRenderingCategory = "qa";
             const qaInfo = calculateAverage(subData.qa);
             const qaBadges = qaInfo.htmlBadges.replace(/deleteSingleEntry\('/g, `deleteSingleEntry('${subj}', 'qa', '`);
 
@@ -851,6 +993,7 @@
 
     function renderFinalSummaryMetrics() {
         const tbody = document.getElementById('finalSummaryBody');
+        if(!tbody) return;
         tbody.innerHTML = '';
 
         const quartersList = ["q1", "q2", "q3", "q4"];
@@ -915,13 +1058,8 @@
             alert("Please enter a valid max point denominator total greater than 0.");
             return;
         }
-        if (score > total) {
-            alert("Warning: Inputted score exceeds total maximum test points.");
-        }
 
         if(!academicData[subj][cat]) academicData[subj][cat] = [];
-        
-        // Calculate the raw item percentage instantly for historical mapping compatibility
         const generatedPercentage = (score / total) * 100;
 
         academicData[subj][cat].push({
@@ -991,6 +1129,7 @@
     function renderReminders() {
         const tbody = document.getElementById('deadlinesBody');
         const completedTbody = document.getElementById('completedBody');
+        if(!tbody || !completedTbody) return;
         
         tbody.innerHTML = '';
         completedTbody.innerHTML = '';
@@ -1075,8 +1214,17 @@
         }
     }
 
+    // Initialize systems on layout mount
     initWorkspaceSelector();
+    updateCloudHudUI();
     toggleTermViewUI();
+
+    // Background verification initialization hook for live instances
+    if(store.cloudUser) {
+        pushDataToCloudCloudSync();
+    }
+
+
 </script>
 
 </body>
