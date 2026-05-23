@@ -86,6 +86,22 @@
             border-color: #dadce0;
             color: #5f6368;
         }
+        /* ── Cloud HUD state variants ── */
+        .cloud-hud.syncing {
+            background: #fff8e1;
+            border-color: #ffe082;
+            color: #8a6d1c;
+            animation: hud-pulse 1.1s ease-in-out infinite;
+        }
+        .cloud-hud.sync-error {
+            background: #fce8e6;
+            border-color: #f5c6c2;
+            color: #ba3c2a;
+        }
+        @keyframes hud-pulse {
+            0%,100% { opacity: 1; }
+            50%      { opacity: 0.55; }
+        }
 
         .controls-toolbar {
             display: flex;
@@ -295,81 +311,6 @@
             text-align: center;
             margin-top: 15px;
         }
-    
-    /* ── Supabase Setup Overlay ── */
-    .sb-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(44,37,32,0.55);
-        backdrop-filter: blur(4px);
-        z-index: 9999;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-    }
-    .sb-modal {
-        background: #fff;
-        border-radius: 14px;
-        padding: 28px;
-        width: 100%;
-        max-width: 560px;
-        box-shadow: 0 12px 48px rgba(0,0,0,0.22);
-        position: relative;
-    }
-    .sb-modal h3 {
-        font-size: 1.2rem;
-        font-weight: 700;
-        margin-bottom: 6px;
-        color: var(--primary-text);
-    }
-    .sb-modal p { font-size: 0.85rem; color: var(--secondary-text); margin-bottom: 18px; line-height: 1.5; }
-    .sb-modal code {
-        display: block;
-        background: #f7f1eb;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 0.78rem;
-        margin-bottom: 16px;
-        white-space: pre-wrap;
-        word-break: break-all;
-        color: var(--primary-text);
-        line-height: 1.6;
-    }
-    .sb-field { margin-bottom: 14px; }
-    .sb-field label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--secondary-text); margin-bottom: 5px; }
-    .sb-field input {
-        width: 100%;
-        padding: 10px 12px;
-        border: 1.5px solid var(--border-color);
-        border-radius: 8px;
-        font-size: 0.9rem;
-        outline: none;
-        font-family: monospace;
-        color: var(--primary-text);
-    }
-    .sb-field input:focus { border-color: var(--accent-color); }
-    .sb-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-    #sbStatusMsg { font-size: 0.85rem; margin-top: 10px; display: none; font-weight: 600; }
-    .sb-close-x {
-        position: absolute; top: 14px; right: 16px;
-        background: none; border: none; font-size: 1.3rem;
-        cursor: pointer; color: var(--secondary-text); line-height: 1;
-    }
-    .sb-close-x:hover { color: var(--danger-color); }
-    .sb-step {
-        background: #f7f1eb;
-        border-left: 3px solid var(--accent-color);
-        padding: 8px 12px;
-        border-radius: 0 6px 6px 0;
-        font-size: 0.82rem;
-        color: var(--primary-text);
-        margin-bottom: 10px;
-        line-height: 1.6;
-    }
-    .sb-step strong { color: var(--accent-color); }
-
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -408,7 +349,6 @@
 
             <div class="toolbar-group">
                 <button id="cloudAccountBtn" class="btn btn-success" onclick="toggleCloudAccountConnection()">☁️ Connect Cloud</button>
-                <button id="sbConfigBtn" class="btn" style="background:#e8f0fe;color:#1a5cd8;border:1px solid #b3cdf7;" onclick="openSbSetupPanel()" title="Configure Supabase connection">⚙️ Configure DB</button>
                 <button class="btn btn-secondary" onclick="createNewWorkspace()">+ New Dir</button>
                 <button class="btn btn-danger" onclick="triggerReset()">🛡️ Clear Term</button>
                 <button class="btn btn-danger" style="background-color: #ad2b1a;" onclick="deleteCurrentWorkspace()">🗑️ Delete Entire Directory</button>
@@ -565,48 +505,18 @@
 </div>
 
 <script>
-    // ═══════════════════════════════════════════════════════════════
-    // SUPABASE CLOUD ENGINE
-    // Credentials are entered by YOU via the setup panel in the UI.
-    // They are stored only in your own device's localStorage and are
-    // never hardcoded or shared. Nothing is sent anywhere except your
-    // own Supabase project.
-    // ═══════════════════════════════════════════════════════════════
+    // ── Supabase project: "Euclir's Project" (ap-northeast-1) ──────────────────
+    // These are YOUR real credentials for usslrzmpmnmnfmgfddxo.supabase.co
+    // The anon/public key is safe to ship in client-side code.
+    const SB_URL = "https://usslrzmpmnmnfmgfddxo.supabase.co";
+    const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzc2xyem1wbW5tbmZtZ2ZkZHhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1MTk1MjEsImV4cCI6MjA5NTA5NTUyMX0.0EB0qCpJMopZp20qXGRELcWiPJ5sy6ht4pLD1E9D6y4";
     let supabaseClient = null;
-
-    /** Build (or rebuild) the Supabase client from stored credentials. */
-    function initSupabaseClient() {
-        const cfg = getSbConfig();
-        if (!cfg || !window.supabase) { supabaseClient = null; return false; }
-        try {
-            supabaseClient = window.supabase.createClient(cfg.url, cfg.key);
-            return true;
-        } catch(e) { supabaseClient = null; return false; }
+    if (window.supabase) {
+        supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+        console.log("[Cloud] Supabase client initialised →", SB_URL);
+    } else {
+        console.warn("[Cloud] Supabase JS library not loaded.");
     }
-
-    /** Read Supabase config from localStorage. Returns null if not configured. */
-    function getSbConfig() {
-        try {
-            const raw = localStorage.getItem('sb_config');
-            if (!raw) return null;
-            const cfg = JSON.parse(raw);
-            if (!cfg.url || !cfg.key) return null;
-            return cfg;
-        } catch(e) { return null; }
-    }
-
-    /** Persist Supabase credentials to localStorage (separate key from grade data). */
-    function saveSbConfig(url, key) {
-        localStorage.setItem('sb_config', JSON.stringify({ url: url.trim(), key: key.trim() }));
-    }
-
-    /** Wipe saved Supabase credentials. */
-    function clearSbConfig() {
-        localStorage.removeItem('sb_config');
-    }
-
-    // Attempt to restore client from credentials saved in a previous session
-    initSupabaseClient();
 
     const coreDefaultSubjects = {
         Math: { ww: [], pt: [], qa: [], wwWeight: 40, ptWeight: 40, qaWeight: 20 },
@@ -686,97 +596,38 @@
         store.activeId = currentWorkspaceId;
         localStorage.setItem('academicStore', JSON.stringify(store));
         
-        // Background cloud sync — fires every save if an account is connected
-        pushDataToCloud();
+        // Trigger background cloud sync cascade instantly if connected
+        pushDataToCloudCloudSync();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // CLOUD ENGINE — Supabase sync system
-    // Table required in your Supabase project (run once in SQL editor):
+    // ════════════════════════════════════════════════════════════════
+    //  CLOUD SYNC ENGINE  — Supabase "academic_vault" table
+    //  Table schema (already created in your project):
+    //    username TEXT PRIMARY KEY, pin TEXT, payload TEXT, updated_at TIMESTAMPTZ
     //
-    //   create table if not exists academic_vault (
-    //     username  text primary key,
-    //     pin       text not null,
-    //     payload   text not null,
-    //     updated_at timestamptz default now()
-    //   );
-    //   alter table academic_vault enable row level security;
-    //   create policy "Public access" on academic_vault
-    //     for all using (true) with check (true);
-    //
-    // ═══════════════════════════════════════════════════════════════
+    //  Usage flow:
+    //    1. Click "☁️ Connect Cloud"
+    //    2. Enter a username (letters/numbers, min 3) + 4-digit PIN
+    //    3. New account → your data pushes up immediately
+    //       Existing account → choose to pull cloud data OR push local data
+    //    4. Every save after that auto-syncs silently in the background
+    //    5. On a second device: repeat steps 1-2, choose "Load from cloud"
+    // ════════════════════════════════════════════════════════════════
 
-    /**
-     * Open the Supabase setup panel so the user can enter their
-     * project URL and anon key. Called by the ⚙️ Configure button.
-     */
-    function openSbSetupPanel() {
-        document.getElementById('sbSetupOverlay').style.display = 'flex';
-        const cfg = getSbConfig();
-        if (cfg) {
-            document.getElementById('sbUrlInput').value = cfg.url;
-            document.getElementById('sbKeyInput').value = cfg.key;
-        }
+    /** Update the green/grey HUD pill in the header */
+    function setHudState(state, text) {
+        const hud = document.getElementById('cloudHudStatus');
+        const txt = document.getElementById('cloudStatusText');
+        // state: 'connected' | 'disconnected' | 'syncing' | 'error'
+        hud.className = 'cloud-hud' + (state !== 'connected' ? ' ' + state : '');
+        if (text) txt.textContent = text;
     }
 
-    function closeSbSetupPanel() {
-        document.getElementById('sbSetupOverlay').style.display = 'none';
-    }
-
-    /** Save credentials entered in the setup panel, rebuild the client. */
-    function saveSbSetup() {
-        const url = document.getElementById('sbUrlInput').value.trim();
-        const key = document.getElementById('sbKeyInput').value.trim();
-
-        if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-            alert('That doesn\'t look like a valid Supabase project URL.\nIt should look like: https://xxxx.supabase.co');
-            return;
-        }
-        if (key.length < 100) {
-            alert('That doesn\'t look like a valid Supabase anon key.\nCopy the full "anon public" key from your project settings.');
-            return;
-        }
-
-        saveSbConfig(url, key);
-        const ok = initSupabaseClient();
-        if (!ok) { alert('Failed to initialise Supabase client. Double-check the URL and key.'); return; }
-
-        closeSbSetupPanel();
-        updateCloudHudUI();
-        showSbStatus('✅ Supabase configured. Now click ☁️ Connect Cloud to link your account.', 'green');
-    }
-
-    /** Wipe credentials and disconnect entirely. */
-    function removeSbSetup() {
-        if (!confirm('Remove saved Supabase credentials from this device?')) return;
-        clearSbConfig();
-        store.cloudUser = null;
-        store.cloudPin  = null;
-        supabaseClient  = null;
-        localStorage.setItem('academicStore', JSON.stringify(store));
-        closeSbSetupPanel();
-        updateCloudHudUI();
-    }
-
-    /** Show a temporary status message inside the setup panel. */
-    function showSbStatus(msg, color) {
-        const el = document.getElementById('sbStatusMsg');
-        el.textContent = msg;
-        el.style.color = color === 'green' ? 'var(--success-color)' : 'var(--danger-color)';
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 5000);
-    }
-
-    /**
-     * Main connect/disconnect button handler.
-     * - If already connected: offers to disconnect.
-     * - If no Supabase client: prompts user to configure first.
-     * - Otherwise: prompts for username + PIN, then logs in or registers.
-     */
+    /** Connect or disconnect cloud sync */
     async function toggleCloudAccountConnection() {
-        // ── Disconnect flow ──
+        // ── Already connected → offer disconnect ──
         if (store.cloudUser) {
-            if (confirm('Disconnect from cloud sync? Your data stays safe on this device.')) {
+            if (confirm('Disconnect from cloud sync?\nYour grades remain saved on this device.')) {
                 store.cloudUser = null;
                 store.cloudPin  = null;
                 localStorage.setItem('academicStore', JSON.stringify(store));
@@ -785,134 +636,128 @@
             return;
         }
 
-        // ── Guard: must configure Supabase first ──
+        // ── Not connected → run login / registration ──
         if (!supabaseClient) {
-            if (confirm('No Supabase project connected yet.\nOpen the setup panel to enter your project URL and anon key?')) {
-                openSbSetupPanel();
-            }
+            alert('Cloud service unavailable.\nThe Supabase library did not load — check your internet connection and refresh.');
             return;
         }
 
-        // ── Prompt for credentials ──
-        const username = prompt('Enter your Cloud Username (letters & numbers, min 3 chars):');
-        if (!username) return;
-        const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-        if (cleanUser.length < 3) { alert('Username must be at least 3 alphanumeric characters.'); return; }
+        const rawUser = prompt('Enter your Cloud Username:\n(letters & numbers only, min 3 characters)');
+        if (!rawUser) return;
+        const cleanUser = rawUser.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+        if (cleanUser.length < 3) {
+            alert('Username must be at least 3 alphanumeric characters.');
+            return;
+        }
 
-        const pin = prompt('Enter your 4-digit security PIN:');
-        if (!pin || !/^\d{4}$/.test(pin)) { alert('PIN must be exactly 4 digits (numbers only).'); return; }
+        const pin = prompt('Enter your 4-digit Security PIN:');
+        if (!pin || !/^\d{4}$/.test(pin)) {
+            alert('Invalid PIN — please enter exactly 4 digits.');
+            return;
+        }
 
-        // Show connecting status
-        document.getElementById('cloudStatusText').textContent = '⚡ Connecting…';
-        document.getElementById('cloudHudStatus').className = 'cloud-hud disconnected';
+        setHudState('syncing', '⚡ Connecting to cloud…');
 
         try {
+            // Look up whether this username already exists in the vault
             const { data, error } = await supabaseClient
                 .from('academic_vault')
-                .select('*')
+                .select('username, pin, payload')
                 .eq('username', cleanUser)
                 .maybeSingle();
 
             if (error) throw error;
 
             if (data) {
-                // ── Existing account: verify PIN ──
+                // ── Returning user: verify PIN ──
                 if (data.pin !== pin) {
-                    alert('Incorrect PIN for that username. Access denied.');
-                    updateCloudHudUI();
+                    alert('❌ Wrong PIN for that username. Access denied.');
+                    setHudState('error', '❌ Login failed');
+                    setTimeout(updateCloudHudUI, 3000);
                     return;
                 }
-                // ── Offer to pull cloud data or push local ──
+
+                // PIN correct: ask whether to pull cloud → local or push local → cloud
                 const pullCloud = confirm(
-                    '✅ Account found!\n\n' +
-                    'Click OK  → Load YOUR CLOUD data onto this device (replaces local).\n' +
-                    'Click Cancel → Push THIS DEVICE\'s data to the cloud (overwrites cloud).'
+                    '✅ Cloud account found for "' + cleanUser + '"\n\n' +
+                    'Click OK     → Load YOUR CLOUD data onto this device\n' +
+                    'Click Cancel → Upload THIS DEVICE\'s data to the cloud'
                 );
+
                 if (pullCloud) {
-                    const parsedStore = JSON.parse(data.payload);
-                    parsedStore.cloudUser = cleanUser;
-                    parsedStore.cloudPin  = pin;
-                    store = parsedStore;
+                    // ── Pull: replace local store with cloud payload ──
+                    const cloudStore = JSON.parse(data.payload);
+                    cloudStore.cloudUser = cleanUser;
+                    cloudStore.cloudPin  = pin;
+                    store = cloudStore;
                     currentWorkspaceId = store.activeId;
                     verifyWorkspaceDataStructure(currentWorkspaceId);
                     localStorage.setItem('academicStore', JSON.stringify(store));
-                    location.reload(); // full reload so all UI reflects pulled data
+                    // Reload page so all UI refreshes from the cloud data
+                    location.reload();
                     return;
                 }
+                // else: fall through to push local data up
             }
 
-            // ── New account or push local → cloud ──
+            // ── New account OR user chose to push local data up ──
             store.cloudUser = cleanUser;
             store.cloudPin  = pin;
             localStorage.setItem('academicStore', JSON.stringify(store));
             updateCloudHudUI();
-            await pushDataToCloud();
+            await pushDataToCloudCloudSync(); // immediate first push
 
         } catch (err) {
-            console.error('Cloud connection error:', err);
-            alert('Connection error: ' + (err.message || 'Check your Supabase config and table setup.'));
-            updateCloudHudUI();
+            console.error('[Cloud] Login error:', err);
+            alert('Connection error: ' + (err?.message || String(err)));
+            setHudState('error', '❌ Connection failed');
+            setTimeout(updateCloudHudUI, 3000);
         }
     }
 
     /**
-     * Push the full local store to Supabase.
-     * Called automatically every time saveToStorage() is invoked
-     * while a cloud account is connected.
+     * Push the full store object to Supabase.
+     * Called automatically on every saveToStorage() when logged in.
+     * Silently updates the HUD to show sync status.
      */
-    async function pushDataToCloud() {
+    async function pushDataToCloudCloudSync() {
         if (!store.cloudUser || !store.cloudPin || !supabaseClient) return;
+
+        setHudState('syncing', '⚡ Syncing…');
 
         try {
             const { error } = await supabaseClient
                 .from('academic_vault')
-                .upsert({
-                    username:   store.cloudUser,
-                    pin:        store.cloudPin,
-                    payload:    JSON.stringify(store),
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'username' });
+                .upsert(
+                    {
+                        username:   store.cloudUser,
+                        pin:        store.cloudPin,
+                        payload:    JSON.stringify(store),
+                        updated_at: new Date().toISOString()
+                    },
+                    { onConflict: 'username' }
+                );
 
             if (error) throw error;
 
-            // Update HUD to show synced timestamp
-            const t = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-            document.getElementById('cloudHudStatus').className = 'cloud-hud';
-            document.getElementById('cloudStatusText').textContent = `☁️ ${store.cloudUser} · Synced ${t}`;
+            setHudState('connected', '☁️ Synced · ' + store.cloudUser);
+            console.log('[Cloud] Push successful at', new Date().toLocaleTimeString());
 
-        } catch (err) {
-            console.error('Cloud push error:', err);
-            document.getElementById('cloudHudStatus').className = 'cloud-hud disconnected';
-            document.getElementById('cloudStatusText').textContent = '❌ Sync failed — working offline';
+        } catch (e) {
+            console.error('[Cloud] Push failed:', e);
+            setHudState('error', '❌ Sync paused — will retry on next save');
         }
     }
 
-    // Keep backwards compatibility — old call sites used this name
-    function pushDataToCloudCloudSync() { pushDataToCloud(); }
-
     function updateCloudHudUI() {
-        const hud  = document.getElementById('cloudHudStatus');
-        const txt  = document.getElementById('cloudStatusText');
-        const btn  = document.getElementById('cloudAccountBtn');
-        const cfg  = getSbConfig();
-        const cfgBtn = document.getElementById('sbConfigBtn');
-
+        const btn = document.getElementById('cloudAccountBtn');
         if (store.cloudUser) {
-            hud.className  = 'cloud-hud';
-            txt.textContent = `☁️ ${store.cloudUser} · Cloud Active`;
-            btn.textContent = '🔌 Disconnect';
-        } else if (cfg) {
-            hud.className  = 'cloud-hud disconnected';
-            txt.textContent = '☁️ Supabase configured — not signed in';
-            btn.textContent = '☁️ Connect Cloud';
+            setHudState('connected', '☁️ Synced · ' + store.cloudUser);
+            if (btn) btn.textContent = "🔌 Disconnect Cloud";
         } else {
-            hud.className  = 'cloud-hud disconnected';
-            txt.textContent = '☁️ Offline (Local Only)';
-            btn.textContent = '☁️ Connect Cloud';
+            setHudState('disconnected', '☁️ Offline Mode (Local Save)');
+            if (btn) btn.textContent = "☁️ Connect Cloud";
         }
-
-        // Show/hide the configure button based on whether credentials exist
-        if (cfgBtn) cfgBtn.style.display = cfg ? 'inline-flex' : 'inline-flex';
     }
 
     function initWorkspaceSelector() {
@@ -1451,64 +1296,18 @@
         }
     }
 
-    // ── Boot sequence ──
-    initSupabaseClient();        // restore Supabase client from saved credentials
-    initWorkspaceSelector();     // populate directory dropdown
-    updateCloudHudUI();          // set correct button/HUD labels
-    toggleTermViewUI();          // render the correct quarter view
+    // Initialize systems on layout mount
+    initWorkspaceSelector();
+    updateCloudHudUI();
+    toggleTermViewUI();
 
-    // If an account was already connected, push a background sync
+    // ── On page load: if already connected, do a background sync push ──
     if (store.cloudUser && supabaseClient) {
-        pushDataToCloud();
+        pushDataToCloudCloudSync();
     }
 
 
 </script>
-
-
-<!-- ══════════════════════════════════════════
-     SUPABASE SETUP OVERLAY
-══════════════════════════════════════════ -->
-<div id="sbSetupOverlay" class="sb-overlay" onclick="if(event.target===this)closeSbSetupPanel()">
-  <div class="sb-modal">
-    <button class="sb-close-x" onclick="closeSbSetupPanel()">✕</button>
-    <h3>☁️ Supabase Cloud Setup</h3>
-    <p>Connect your own free Supabase project to sync grades across all your devices. Your data is stored only in your project — never shared.</p>
-
-    <div class="sb-step">
-      <strong>Step 1.</strong> Go to <strong>supabase.com</strong> → New Project (free tier is enough).<br>
-      <strong>Step 2.</strong> Open <strong>SQL Editor</strong> and run the query below once to create the storage table.<br>
-      <strong>Step 3.</strong> Go to <strong>Project Settings → API</strong> and copy your Project URL and anon/public key below.
-    </div>
-
-    <code>create table if not exists academic_vault (
-  username   text primary key,
-  pin        text not null,
-  payload    text not null,
-  updated_at timestamptz default now()
-);
-alter table academic_vault enable row level security;
-create policy "Public read-write" on academic_vault
-  for all using (true) with check (true);</code>
-
-    <div class="sb-field">
-      <label for="sbUrlInput">Project URL <span style="font-weight:400;opacity:.7">(e.g. https://xxxx.supabase.co)</span></label>
-      <input type="url" id="sbUrlInput" placeholder="https://your-project-id.supabase.co" autocomplete="off" />
-    </div>
-    <div class="sb-field">
-      <label for="sbKeyInput">Anon / Public API Key</label>
-      <input type="text" id="sbKeyInput" placeholder="eyJhbGci…" autocomplete="off" />
-    </div>
-
-    <div id="sbStatusMsg"></div>
-
-    <div class="sb-actions">
-      <button class="btn btn-primary" onclick="saveSbSetup()">💾 Save & Connect</button>
-      <button class="btn" style="background:#f7f1eb;color:var(--secondary-text);border:1px solid var(--border-color);" onclick="closeSbSetupPanel()">Cancel</button>
-      <button class="btn btn-danger" style="margin-left:auto;" onclick="removeSbSetup()">🗑️ Remove Credentials</button>
-    </div>
-  </div>
-</div>
 
 </body>
 </html>
